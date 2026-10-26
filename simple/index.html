@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#fff6e7">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="猫跳一跳">
+  <meta name="description" content="猫跳一跳：按住蓄力，松开起跳。七只猫咪各有绝活，找找藏在最后的小熊猫。">
+  <title>猫跳一跳 · Nya Nya Jump</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23ff8b78'/%3E%3Cg fill='%23fff7e8'%3E%3Cellipse cx='32' cy='39' rx='12' ry='10'/%3E%3Cellipse cx='18' cy='27' rx='5' ry='6.5' transform='rotate(-20 18 27)'/%3E%3Cellipse cx='28' cy='21' rx='5' ry='6.5'/%3E%3Cellipse cx='38' cy='21' rx='5' ry='6.5'/%3E%3Cellipse cx='47' cy='27' rx='5' ry='6.5' transform='rotate(20 47 27)'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app" id="app" data-screen="home">
+    <canvas id="gameCanvas" aria-label="猫跳一跳游戏画面">
+      你的浏览器需要支持 Canvas 才能游玩猫跳一跳。
+    </canvas>
+
+    <div class="paper-grain" aria-hidden="true"></div>
+
+    <div class="ui-layer">
+      <header class="topbar" id="topbar">
+        <div class="brand" id="brandHome">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <path d="M8.4 12.4 6.8 5.9l5.5 3.2a11 11 0 0 1 7.4 0l5.5-3.2-1.6 6.5a10.2 10.2 0 0 1 2.3 6.5c0 5.1-4.4 8.6-9.9 8.6s-9.9-3.5-9.9-8.6c0-2.4.9-4.7 2.3-6.5Z" fill="currentColor"/>
+              <circle cx="12.4" cy="18.1" r="1.25" fill="#FFF7E8"/>
+              <circle cx="19.6" cy="18.1" r="1.25" fill="#FFF7E8"/>
+              <path d="M14.3 21.5c1.1.8 2.3.8 3.4 0" stroke="#FFF7E8" stroke-width="1.2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="brand-word">猫跳一跳</span>
+        </div>
+
+        <div class="game-score" id="scoreHud" aria-live="polite">
+          <span class="score-label">本局</span>
+          <strong id="scoreValue">0</strong>
+          <span class="score-unit">分</span>
+        </div>
+
+        <div class="top-actions">
+          <div class="best-chip" title="本机最高分">
+            <span>最高</span>
+            <b id="bestValue">0</b>
+          </div>
+          <button class="icon-btn" id="soundBtn" type="button" aria-label="关闭音效" title="音效">
+            <svg class="icon-sound-on" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 9.5v5h3.2l4.2 3.4V6.1L7.2 9.5H4Z" fill="currentColor"/>
+              <path d="M15 8.3a5 5 0 0 1 0 7.4M17.8 5.5a9 9 0 0 1 0 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <svg class="icon-sound-off" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 9.5v5h3.2l4.2 3.4V6.1L7.2 9.5H4Z" fill="currentColor"/>
+              <path d="m15.2 9.3 4.9 4.9m0-4.9-4.9 4.9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button class="icon-btn" id="pauseBtn" type="button" aria-label="暂停游戏" title="暂停">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="7" y="5.5" width="3.5" height="13" rx="1.4" fill="currentColor"/>
+              <rect x="13.5" y="5.5" width="3.5" height="13" rx="1.4" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <section class="screen home-screen is-active" id="homeScreen">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="eyebrow-dot"></span>NYA NYA JUMP</div>
+          <h1>猫跳一跳</h1>
+          <p>蓄力，起跳，落进软乎乎的云里。</p>
+        </div>
+
+        <div class="home-bottom">
+          <div class="cat-strip-head">
+            <div>
+              <span class="section-kicker">CAT CREW</span>
+              <h2>今天带谁出门</h2>
+            </div>
+            <span class="strip-hint">左右滑滑看</span>
+          </div>
+
+          <div class="cat-strip" id="catStrip" role="listbox" aria-label="选择猫咪"></div>
+
+          <div class="selected-card">
+            <div class="selected-avatar-wrap" aria-hidden="true">
+              <canvas class="selected-avatar" id="selectedAvatar" width="128" height="128"></canvas>
+            </div>
+            <div class="selected-copy">
+              <span class="selected-label">当前猫选</span>
+              <div class="selected-name-row">
+                <h2 id="selectedName">波斯猫</h2>
+                <span class="skill-name" id="skillName">从容蓄力</span>
+              </div>
+              <p id="skillDesc">蓄力更慢更稳，远距离更好拿捏。</p>
+            </div>
+            <button class="mini-skill-toggle" id="miniSkillBtn" type="button" aria-label="开关猫咪技能">
+              <span class="mini-toggle-dot"></span>
+              <span id="miniSkillText">技能开</span>
+            </button>
+          </div>
+
+          <div class="home-actions">
+            <button class="primary-btn start-btn" id="startBtn" type="button">
+              <span>开始跳</span>
+              <span class="btn-arrow" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="M5 12h13m-5-5 5 5-5 5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+            </button>
+            <button class="icon-btn soft-icon" id="settingsBtnHome" type="button" aria-label="打开设置" title="设置">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2Z" stroke="currentColor" stroke-width="1.8"/>
+                <path d="M19.2 13.4c.1-.5.1-.9 0-1.4l1.6-1.3-1.8-3.1-1.9.7c-.4-.3-.8-.6-1.2-.8L15.5 5h-3.6l-.4 2.5c-.5.2-.9.5-1.3.8l-1.9-.7-1.8 3.1 1.7 1.3c-.1.5-.1.9 0 1.4l-1.6 1.3 1.8 3.1 1.9-.7c.4.3.8.6 1.2.8l.4 2.5h3.6l.4-2.5c.4-.2.8-.5 1.2-.8l1.9.7 1.8-3.1-1.6-1.3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+          <p class="desk-hint">按住屏幕蓄力 · 松手起跳 · 空格键也可以</p>
+          <a class="simple-advanced-link" href="../index.html">← 回到高级模式</a>
+        </div>
+      </section>
+
+      <section class="screen game-screen" id="gameScreen">
+        <div class="combo-badge" id="comboBadge" aria-live="polite">
+          <span class="combo-spark" aria-hidden="true">✦</span>
+          <b id="comboText">完美 ×2</b>
+        </div>
+
+        <div class="skill-status" id="skillStatus">
+          <span class="skill-status-dot" aria-hidden="true"></span>
+          <span id="skillStatusText">尾巴回旋 · 待命</span>
+        </div>
+
+        <div class="tutorial" id="tutorial">
+          <span class="press-ring" aria-hidden="true"></span>
+          <div>
+            <strong>按住蓄力</strong>
+            <span>松手起跳 · 落在猫爪印上更准</span>
+          </div>
+        </div>
+
+        <div class="perfect-flash" id="perfectFlash" aria-hidden="true">
+          <span>PERFECT</span>
+          <small>猫爪正中心</small>
+        </div>
+      </section>
+
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+      <div class="modal-overlay pause-overlay" id="pauseOverlay">
+        <div class="modal-card pause-card" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+          <div class="modal-paw" aria-hidden="true">🐾</div>
+          <span class="modal-kicker">PAWSED</span>
+          <h2 id="pauseTitle">歇一小会儿</h2>
+          <p>猫咪正在舔爪子，分数不会跑。</p>
+          <button class="primary-btn" id="resumeBtn" type="button">继续跳</button>
+          <div class="text-actions">
+            <button class="text-btn" id="pauseSettingsBtn" type="button">设置</button>
+            <span aria-hidden="true">·</span>
+            <button class="text-btn" id="pauseHomeBtn" type="button">回到首页</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay gameover-overlay" id="gameoverOverlay">
+        <div class="modal-card gameover-card" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+          <span class="modal-kicker">ROUND OVER</span>
+          <h2 id="resultTitle">猫步渐稳</h2>
+          <p class="result-quote" id="resultQuote">差一点就摸到云了。</p>
+          <div class="result-score">
+            <strong id="finalScore">0</strong>
+            <span>分</span>
+          </div>
+          <div class="result-stats">
+            <div><b id="finalPerfect">0</b><span>Perfect</span></div>
+            <div><b id="finalCombo">0</b><span>最高连击</span></div>
+            <div><b id="finalJumps">0</b><span>跳了</span></div>
+          </div>
+          <div class="unlock-note" id="unlockNote" hidden>
+            <span class="unlock-fur" aria-hidden="true"></span>
+            <div>
+              <b>小熊猫悄悄探出了头</b>
+              <span>隐藏猫咪已解锁，回首页就能选它。</span>
+            </div>
+          </div>
+          <button class="primary-btn" id="retryBtn" type="button">
+            <span>再来一次</span>
+            <span class="btn-arrow" aria-hidden="true">↻</span>
+          </button>
+          <div class="text-actions">
+            <button class="text-btn" id="resultHomeBtn" type="button">回到首页</button>
+            <span aria-hidden="true">·</span>
+            <button class="text-btn" id="resultCatBtn" type="button">换只猫</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-overlay settings-overlay" id="settingsOverlay">
+        <div class="modal-card settings-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+          <button class="close-btn" id="settingsCloseBtn" type="button" aria-label="关闭设置">×</button>
+          <span class="modal-kicker">SETTINGS</span>
+          <h2 id="settingsTitle">小猫咪偏好</h2>
+          <p class="settings-intro">技能关掉后，所有猫咪只比脚法，公平得很。</p>
+
+          <div class="setting-list">
+            <label class="setting-row">
+              <span class="setting-copy">
+                <b>猫咪技能</b>
+                <small>关掉后所有角色回归同一套判定</small>
+              </span>
+              <span class="toggle">
+                <input type="checkbox" id="skillsToggle">
+                <span class="toggle-track"><span class="toggle-knob"></span></span>
+              </span>
+            </label>
+            <label class="setting-row">
+              <span class="setting-copy">
+                <b>游戏音效</b>
+                <small>蓄力、落地与完美连击的声音</small>
+              </span>
+              <span class="toggle">
+                <input type="checkbox" id="soundToggle">
+                <span class="toggle-track"><span class="toggle-knob"></span></span>
+              </span>
+            </label>
+            <label class="setting-row">
+              <span class="setting-copy">
+                <b>震动反馈</b>
+                <small>支持的手机与平板上轻轻震一下</small>
+              </span>
+              <span class="toggle">
+                <input type="checkbox" id="hapticsToggle">
+                <span class="toggle-track"><span class="toggle-knob"></span></span>
+              </span>
+            </label>
+            <label class="setting-row">
+              <span class="setting-copy">
+                <b>轻量动效</b>
+                <small>减少粒子与镜头晃动，眼睛更轻松</small>
+              </span>
+              <span class="toggle">
+                <input type="checkbox" id="motionToggle">
+                <span class="toggle-track"><span class="toggle-knob"></span></span>
+              </span>
+            </label>
+          </div>
+
+          <div class="settings-footnote">
+            <span aria-hidden="true">✦</span>
+            <span>最高分、解锁进度和偏好只保存在这台设备。</span>
+          </div>
+          <button class="secondary-btn" id="settingsDoneBtn" type="button">知道啦</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
