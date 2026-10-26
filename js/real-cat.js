@@ -18,7 +18,7 @@
   /* On-screen height of a cat at scale 1, in game units.                   */
   const DRAW_H = 100;
 
-  const ASSET_BASE = "assets/";
+  const ASSET_BASE = "catimg/";
 
   const catImages = Object.create(null);
   const headImages = Object.create(null);
