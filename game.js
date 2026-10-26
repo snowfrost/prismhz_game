@@ -805,7 +805,7 @@
   /* 体型缩放：0.86 ~ 1.16，避免过大压到平台边 */
   function sizeScale() {
     const phys = playerPhysics();
-    return clamp(1 + (phys.size - 1) * 0.55, 0.86, 1.18);
+    return clamp(1 + (phys.size - 1) * 1.15, 0.8, 1.28);
   }
 
   function barLength() {
@@ -816,16 +816,18 @@
   function chargeDuration() {
     if (!physicsOn()) return BASE_CHARGE_MS;
     const phys = playerPhysics();
-    /* chargeSpeed 越小蓄得越慢 */
-    return BASE_CHARGE_MS / Math.max(0.4, phys.chargeSpeed);
+    /* 指数放大差异：慢猫更慢、快猫更快 */
+    return BASE_CHARGE_MS * Math.pow(1 / Math.max(0.4, phys.chargeSpeed), 1.4);
   }
 
   /* 跳跃距离随 jumpPower 缩放，蓄力条长度随 chargeBarLength 缩放 */
   function jumpRange() {
     const phys = playerPhysics();
+    const jp = Math.max(0.5, phys.jumpPower);
+    /* 非线性放大：强猫跳得明显远，弱猫明显近 */
     return {
-      min: MIN_DIST * phys.jumpPower,
-      max: MAX_DIST * phys.jumpPower,
+      min: MIN_DIST * (0.55 + 0.45 * jp),
+      max: MAX_DIST * Math.pow(jp, 1.45),
     };
   }
 
@@ -1180,7 +1182,10 @@
   /* ------------------------------------------------------------------ */
 
   function difficultyAt(step) {
-    return clamp((step - 2) / 38, 0, 1);
+    /* 前期 32 步爬满 75%，30 步后再爬 55% —— 高手局依然有得涨 */
+    const early = clamp((step - 2) / 32, 0, 1);
+    const late = clamp((step - 30) / 60, 0, 1);
+    return clamp(early * 0.75 + late * 0.55, 0, 1);
   }
 
   function makePlatform(x, y, width, shape, rotation, paletteIndex, step, appear = 1) {
@@ -1211,8 +1216,10 @@
 
   function generateNextPlatform(from, step) {
     const difficulty = difficultyAt(step);
-    const distance = rand(184 + difficulty * 8, 216 + difficulty * 32);
-    const angleRange = 0.19 + difficulty * 0.66;
+    let distance = rand(172 + difficulty * 26, 212 + difficulty * 108);
+    /* 不许超出当前猫的跳跃上限，保证每一跳理论可达 */
+    distance = Math.min(distance, jumpRange().max * 0.9);
+    const angleRange = 0.22 + difficulty * 0.78;
     const angle = rand(-angleRange, angleRange);
     let dx = Math.cos(angle) * distance;
     let dy = Math.sin(angle) * distance;
@@ -1220,13 +1227,13 @@
     dx = Math.sqrt(Math.max(distance * distance - dy * dy, 0));
     const x = from.x + dx;
     const y = from.y + dy;
-    const width = rand(150, 176) * (1 - difficulty * 0.3) * rand(0.92, 1.06);
+    const width = rand(150, 176) * (1 - difficulty * 0.42) * rand(0.9, 1.05);
     let shape;
     if (step < 4) shape = Math.random() > 0.5 ? "square" : "circle";
     else shape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
     let paletteIndex = Math.floor(Math.random() * PALETTES.length);
     if (paletteIndex === from.paletteIndex) paletteIndex = (paletteIndex + 2) % PALETTES.length;
-    const rotation = rand(-0.5, 0.5);
+    const rotation = rand(-0.5, 0.5) * (1 + difficulty * 0.9);
     return makePlatform(x, y, width, shape, rotation, paletteIndex, step, 0);
   }
 
@@ -1319,7 +1326,7 @@
     state.raceBannerTimer = state.mode === "race" ? 3.2 : 0;
     state.landCompress = 0;
     state.skillUsed = false;
-    state.weatherJumpsLeft = 5;
+    state.weatherJumpsLeft = 8;
     state.weatherSeenRun = {};
     state.lastRaceDisplay = "";
     state.resultReason = "";
@@ -1690,7 +1697,9 @@
     state.weatherType = type;
     const difficulty = difficultyAt(state.step);
     state.weatherIntensity = clamp(0.3 + difficulty * 0.7, 0.3, 1);
-    state.windDir = Math.random() > 0.5 ? 1 : -1;
+    /* 60% 概率延续原风向，40% 掉头 —— 风向本身会坑人 */
+    state.windDir = Math.random() < 0.6 ? state.windDir : -state.windDir;
+    if (type !== "wind") state.windDir = Math.random() > 0.5 ? 1 : -1;
     state.lightningTimer = rand(4.5, 8.5);
     state.weatherSeenRun[type] = true;
     if (!options.skipSeen) {
@@ -1708,13 +1717,22 @@
 
   function chooseNextWeather() {
     const difficulty = difficultyAt(state.step);
+    const step = state.step;
+    /* 恶劣天气分段解锁：前 6 跳只有晴/风，雨 6 步后入池，雪 14 步后，雷 22 步后 */
+    const unlocked = {
+      clear: true,
+      wind: true,
+      rain: step >= 6,
+      snow: step >= 14,
+      lightning: step >= 22,
+    };
     const pool = [
-      { type: "clear", weight: 1.15 },
-      { type: "wind", weight: 1.3 },
-      { type: "rain", weight: 1.1 },
-      { type: "snow", weight: 0.65 + difficulty * 0.45 },
-      { type: "lightning", weight: 0.35 + difficulty * 0.55 },
-    ].filter((entry) => entry.type !== state.weatherType);
+      { type: "clear", weight: step < 6 ? 1.7 : Math.max(0.35, 0.85 - difficulty * 0.25) },
+      { type: "wind", weight: 1.35 },
+      { type: "rain", weight: unlocked.rain ? 1.25 + difficulty * 0.25 : 0 },
+      { type: "snow", weight: unlocked.snow ? 0.7 + difficulty * 0.55 : 0 },
+      { type: "lightning", weight: unlocked.lightning ? 0.45 + difficulty * 0.75 : 0 },
+    ].filter((entry) => entry.type !== state.weatherType && entry.weight > 0);
     const total = pool.reduce((sum, entry) => sum + entry.weight, 0);
     let ticket = Math.random() * total;
     for (let i = 0; i < pool.length; i += 1) {
@@ -2329,12 +2347,12 @@
     let slip = 0;
     if (!options.blind && save.weather && state.mode !== "gamble") {
       if (state.weatherType === "wind") {
-        windDrift = state.windDir * (12 + state.weatherIntensity * 26) * rand(0.85, 1.2);
-        windLean = state.windDir * (0.55 + state.weatherIntensity * 0.6);
+        windDrift = state.windDir * (24 + state.weatherIntensity * 66) * rand(0.85, 1.25);
+        windLean = state.windDir * (0.85 + state.weatherIntensity * 0.95);
       } else if (state.weatherType === "rain") {
-        slip = (18 + state.weatherIntensity * 12) * rand(0.85, 1.15);
+        slip = (28 + state.weatherIntensity * 44) * rand(0.85, 1.2);
       } else if (state.weatherType === "snow") {
-        slip = (34 + state.weatherIntensity * 20) * rand(0.85, 1.2);
+        slip = (46 + state.weatherIntensity * 68) * rand(0.85, 1.25);
       }
     }
 

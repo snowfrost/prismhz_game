@@ -64,53 +64,6 @@
     });
   }
 
-  /* 姿态帧：assets/pose/<pose>/<cat>.webp
-     pose 目前支持 stand（默认）/ crouch / leap / fall / land，
-     缺失时自动回退到 stand，再回退到占位色块。                       */
-  const POSES = ["stand", "crouch", "leap", "fall", "land"];
-  const poseImages = Object.create(null);
-
-  function poseKey(pose, name) {
-    return pose + "/" + name;
-  }
-
-  function poseSprite(cat, pose) {
-    const name = assetName(cat);
-    const key = poseKey(pose || "stand", name);
-    if (poseImages[key]) return poseImages[key];
-    if (!pose || pose === "stand") {
-      const rec = spriteOf(cat);
-      poseImages[key] = rec;
-      return rec;
-    }
-    const img = new Image();
-    const record = { img, ready: false, failed: false };
-    pending += 1;
-    img.onload = () => {
-      record.ready = true;
-      pending -= 1;
-    };
-    img.onerror = () => {
-      /* 该姿态没出图：静默回退到站立帧 */
-      record.failed = true;
-      pending -= 1;
-    };
-    img.src = ASSET_BASE + "pose/" + pose + "/" + name + ".webp";
-    poseImages[key] = record;
-    return record;
-  }
-
-  function preloadPoses(poses) {
-    const list = poses && poses.length ? poses : POSES;
-    const names = [
-      "persian", "tabby", "orange", "black", "cow",
-      "siamese", "redpanda", "mystery",
-    ];
-    list.forEach((pose) => {
-      names.forEach((name) => poseSprite({ id: name }, pose));
-    });
-  }
-
   function spriteOf(cat) {
     return loadImage(catImages, assetName(cat), "cats/");
   }
@@ -137,14 +90,13 @@
   function buildPose(options) {
     const o = options || {};
     const charge = typeof o.charge === "number" ? clamp(o.charge, 0, 1) : 0;
-    const air = typeof o.air === "number" ? clamp(o.air, 0, 1) : 0;
+    /* game.js passes jump progress as airT; air remains supported for callers. */
+    const airSource = typeof o.airT === "number" ? o.airT : o.air;
+    const air = typeof airSource === "number" ? clamp(airSource, 0, 1) : 0;
     const land = typeof o.land === "number" ? clamp(o.land, 0, 1) : 0;
     const wind = typeof o.wind === "number" ? clamp(o.wind, -1.6, 1.6) : 0;
     const pitch = typeof o.pitch === "number" ? o.pitch : 0;
     const time = typeof o.time === "number" ? o.time : Date.now() / 1000;
-
-    /* idle breathing makes the still image feel alive */
-    const breathe = Math.sin(time * 1.9) * 0.018;
 
     return {
       charge,
@@ -153,7 +105,10 @@
       wind,
       pitch,
       time,
-      breathe,
+      breathe: Math.sin(time * 1.9) * 0.009,
+      /* One sprite, one continuous deformation timeline — never cross-fade art. */
+      squash: clamp(charge * 0.42 + land * 0.7, 0, 1),
+      stretch: Math.sin(Math.PI * air) * 0.32,
       falling: !!o.falling,
       mood: o.mood || "normal",
     };
@@ -176,58 +131,12 @@
     ctx.restore();
   }
 
-  /* 连续权重：四种姿态同时按物理量分配权重，绘制时叠加重合，天然平滑。 */
-  function poseWeights(pose) {
-    /* 掉落的瞬间优先播 fall 帧，落地后自然回到 land/stand */
-    if (pose.falling && !pose.land) {
-      return [{ pose: "fall", w: 1 }];
-    }
-    const charge = pose.charge;
-    const air = pose.air;
-    const land = pose.land;
-
-    /* 蓄力下蹲：charge 0.15 起爬升，0.7 以后满 */
-    let crouch = smoothstep(0.15, 0.72, charge);
-    /* 腾空收腿：air 越高权重越大 */
-    let leap = smoothstep(0.05, 0.5, air);
-    /* 落地压缩：land 快速起跳后回落 */
-    let landW = smoothstep(0.05, 0.45, land);
-    /* 起跳/落地时把下蹲让出来，避免两个姿态打架 */
-    crouch *= (1 - leap * 0.85) * (1 - landW * 0.7);
-
-    const used = clamp(crouch + leap + landW, 0, 1);
-    const stand = clamp(1 - used, 0, 1);
-
-    return [
-      { pose: "stand", w: stand },
-      { pose: "crouch", w: crouch },
-      { pose: "leap", w: leap },
-      { pose: "land", w: landW },
-    ].filter((f) => f.w > 0.008);
-  }
-
-  function smoothstep(edge0, edge1, x) {
-    const t = clamp((x - edge0) / (edge1 - edge0 || 1), 0, 1);
-    return t * t * (3 - 2 * t);
-  }
-
-  /* 兼容旧接口：返回权重最高的那一帧 */
-  function pickPoseFrame(pose) {
-    const frames = poseWeights(pose);
-    let best = frames[0] || { pose: "stand", w: 1 };
-    frames.forEach((f) => {
-      if (f.w > best.w) best = f;
-    });
-    return { pose: best.pose, blend: 1 - best.w };
-  }
-
   function drawCat(ctx, cat, x, y, options) {
     if (!ctx || !cat) return;
     const o = options || {};
     const pose = buildPose(o);
     const scale = typeof o.scale === "number" ? o.scale : 1;
-    const frames = poseWeights(pose);
-    const fallback = spriteOf(cat);
+    const sprite = spriteOf(cat);
 
     /* Sprite is always drawn at its native 360x300 aspect so every cat keeps
        the exact same scale and foot line.                                */
@@ -261,19 +170,12 @@
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
 
-    let painted = false;
-    frames.forEach((frame) => {
-      let sprite = poseSprite(cat, frame.pose);
-      /* 该姿态帧没出图 → 回退站立，形变仍然生效 */
-      if (!sprite.ready) sprite = fallback;
-      if (!sprite.ready) return;
-      ctx.globalAlpha = frame.w;
+    /* Exactly one image per frame: no sleeping-looking ghost layers on landing. */
+    if (sprite.ready) {
       ctx.drawImage(sprite.img, dx, dy, drawW, drawH);
-      painted = true;
-    });
-    ctx.globalAlpha = 1;
-
-    if (!painted) drawPlaceholder(ctx, drawW, drawH, 0.85);
+    } else {
+      drawPlaceholder(ctx, drawW, drawH, 0.85);
+    }
 
     ctx.restore();
   }
@@ -483,12 +385,8 @@
     body: paintBody,
     randomPortrait: randomPortrait,
     preload: preload,
-    preloadPoses: preloadPoses,
     assetsReady: assetsReady,
     assetName: assetName,
-    pickPoseFrame: pickPoseFrame,
-    poseWeights: poseWeights,
-    poses: POSES.slice(),
     metrics: {
       spriteW: SPRITE_W,
       spriteH: SPRITE_H,
