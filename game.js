@@ -48,13 +48,16 @@
     gambleRuns: 0,
     gambleBest: 0,
     gamblePerfectRuns: 0,
+    precisionRuns: 0,
+    precisionBest: 0,
+    precisionPerfectRuns: 0,
     rescues: 0,
     lightningJumps: 0,
     slipLands: 0,
     randomRuns: 0,
     noSkillBest: 0,
     weatherSeen: {},
-    modes: { classic: 0, race: 0, gamble: 0 },
+    modes: { classic: 0, race: 0, gamble: 0, precision: 0 },
   };
 
   const DEFAULT_SAVE = {
@@ -68,6 +71,7 @@
     mode: "classic",
     raceDuration: 120,
     gambleSteps: 5,
+    bestPrecision: 0,
     best: 0,
     bestRace: 0,
     bestGamble: 0,
@@ -291,6 +295,7 @@
     raceBannerTime: $("#raceBannerTime"),
     blindPanel: $("#blindPanel"),
     blindCount: $("#blindCount"),
+    blindKicker: $("#blindKicker"),
     blindInstruction: $("#blindInstruction"),
     blindProgress: $("#blindProgress"),
     blindSlots: $("#blindSlots"),
@@ -313,6 +318,7 @@
     achProgressBar: $("#achProgressBar"),
     resultKicker: $("#resultKicker"),
     resultTitle: $("#resultTitle"),
+    resultCat: $("#resultCat"),
     resultQuote: $("#resultQuote"),
     finalScore: $("#finalScore"),
     finalPrimary: $("#finalPrimary"),
@@ -432,6 +438,18 @@
     return !!save.motion || prefersReducedMotion();
   }
 
+  /* 盲押与精准共用「按 N 次 → 猫自己跳」的骨架 */
+  const PRECISION_STEPS = 5;
+  const PRECISION_TOL = 0.06;
+
+  function isPrecision() {
+    return state.mode === "precision";
+  }
+
+  function isBlindLike() {
+    return state.mode === "gamble" || state.mode === "precision";
+  }
+
   /* ------------------------------------------------------------------ */
   /* Audio                                                               */
   /* ------------------------------------------------------------------ */
@@ -446,6 +464,7 @@
       this.musicEnabled = !!save.music;
       this.musicTimer = null;
       this.musicStep = 0;
+      this.voice = "cat";
     }
 
     init() {
@@ -455,7 +474,7 @@
         try {
           this.context = new AudioCtor();
           this.master = this.context.createGain();
-          this.master.gain.value = this.muted ? 0 : 0.42;
+          this.master.gain.value = this.muted ? 0 : 0.72;
           this.master.connect(this.context.destination);
         } catch (error) {
           this.context = null;
@@ -470,7 +489,7 @@
     setMuted(muted) {
       this.muted = muted;
       if (this.master && this.context) {
-        this.master.gain.setTargetAtTime(muted ? 0 : 0.42, this.context.currentTime, 0.02);
+        this.master.gain.setTargetAtTime(muted ? 0 : 0.72, this.context.currentTime, 0.02);
       }
       if (muted) {
         this.stopCharge();
@@ -512,8 +531,8 @@
       voice.type = "triangle";
       voice.frequency.setValueAtTime(note, now);
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(0.016, now + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.38);
+      gain.gain.exponentialRampToValueAtTime(0.042, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
       voice.connect(gain);
       gain.connect(this.master);
       voice.start(now);
@@ -524,7 +543,7 @@
         bassVoice.type = "sine";
         bassVoice.frequency.setValueAtTime(bass[Math.floor(this.musicStep / 4) % bass.length], now);
         bassGain.gain.setValueAtTime(0.0001, now);
-        bassGain.gain.exponentialRampToValueAtTime(0.015, now + 0.03);
+        bassGain.gain.exponentialRampToValueAtTime(0.038, now + 0.03);
         bassGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.75);
         bassVoice.connect(bassGain);
         bassGain.connect(this.master);
@@ -534,46 +553,134 @@
       this.musicStep += 1;
     }
 
+    setVoice(catId) {
+      /* 小熊猫不是猫，叫声单独一条线 */
+      this.voice = catId === "redpanda" ? "panda" : "cat";
+    }
+
+    /* 小奶猫叫声：正弦基频 + 二次谐波 + 共振峰滤波，慢起音、6~8Hz 轻颤。
+       狗叫的听感来自锯齿波、快起音和低频爆发，这里全部避开。 */
     meow(kind = "jump") {
       if (this.muted) return;
       this.init();
       if (!this.context || !this.master) return;
+      if (this.voice === "panda") {
+        this.pandaVoice(kind);
+        return;
+      }
       const now = this.context.currentTime;
-      const profiles = {
-        jump: { start: 500, peak: 760, end: 590, duration: 0.24, volume: 0.06 },
-        happy: { start: 590, peak: 860, end: 680, duration: 0.32, volume: 0.05 },
-        fall: { start: 660, peak: 520, end: 300, duration: 0.58, volume: 0.072 },
-        startled: { start: 660, peak: 1060, end: 760, duration: 0.38, volume: 0.085 },
-        hello: { start: 470, peak: 650, end: 520, duration: 0.3, volume: 0.05 },
+      const V = {
+        /* f0 起音 / f1 峰值 / f2 收尾，都是小奶猫的正常频段 */
+        jump: { f0: 640, f1: 1010, f2: 720, dur: 0.26, vol: 0.15, rate: 6.4, depth: 14, fm: 1180, q: 4.2 },
+        happy: { f0: 780, f1: 1160, f2: 900, dur: 0.22, vol: 0.14, rate: 7.2, depth: 11, fm: 1440, q: 4.6 },
+        purr: { f0: 400, f1: 460, f2: 380, dur: 0.13, vol: 0.075, rate: 9.0, depth: 8, fm: 760, q: 3.0 },
+        fall: { f0: 720, f1: 560, f2: 340, dur: 0.64, vol: 0.16, rate: 4.4, depth: 26, fm: 900, q: 3.2 },
+        startled: { f0: 800, f1: 1250, f2: 840, dur: 0.34, vol: 0.17, rate: 8.6, depth: 22, fm: 1520, q: 3.8 },
+        hello: { f0: 560, f1: 800, f2: 640, dur: 0.3, vol: 0.13, rate: 6.0, depth: 12, fm: 1100, q: 4.0 },
       };
-      const profile = profiles[kind] || profiles.jump;
+      const v = V[kind] || V.jump;
+
+      const out = this.context.createGain();
+      const formant = this.context.createBiquadFilter();
+      const soft = this.context.createBiquadFilter();
+      formant.type = "bandpass";
+      formant.frequency.setValueAtTime(v.fm * 0.82, now);
+      formant.frequency.linearRampToValueAtTime(v.fm, now + v.dur * 0.4);
+      formant.Q.value = v.q;
+      soft.type = "lowpass";
+      soft.frequency.value = 3400;
+      soft.Q.value = 0.6;
+
       const osc = this.context.createOscillator();
-      const gain = this.context.createGain();
-      const filter = this.context.createBiquadFilter();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(v.f0, now);
+      osc.frequency.exponentialRampToValueAtTime(v.f1, now + v.dur * 0.34);
+      osc.frequency.exponentialRampToValueAtTime(v.f2, now + v.dur);
+
+      const osc2 = this.context.createOscillator();
+      osc2.type = "sine";
+      osc2.frequency.setValueAtTime(v.f0 * 2, now);
+      osc2.frequency.exponentialRampToValueAtTime(v.f1 * 2, now + v.dur * 0.34);
+      osc2.frequency.exponentialRampToValueAtTime(v.f2 * 2, now + v.dur);
+      const g2 = this.context.createGain();
+      g2.gain.value = 0.2;
+
       const lfo = this.context.createOscillator();
       const lfoGain = this.context.createGain();
-      osc.type = "sawtooth";
-      filter.type = "bandpass";
-      filter.frequency.value = kind === "fall" ? 760 : 980;
-      filter.Q.value = 1.15;
-      osc.frequency.setValueAtTime(profile.start, now);
-      osc.frequency.exponentialRampToValueAtTime(profile.peak, now + profile.duration * 0.22);
-      osc.frequency.exponentialRampToValueAtTime(profile.end, now + profile.duration);
       lfo.type = "sine";
-      lfo.frequency.setValueAtTime(kind === "fall" ? 13 : 23, now);
-      lfoGain.gain.value = kind === "fall" ? 16 : 26;
+      lfo.frequency.value = v.rate;
+      lfoGain.gain.value = v.depth;
       lfo.connect(lfoGain);
       lfoGain.connect(osc.frequency);
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(profile.volume, now + 0.025);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + profile.duration);
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.master);
+      lfoGain.connect(osc2.frequency);
+
+      /* 起音那一下鼻音气声，是「喵」的 m 头 */
+      const breathLen = Math.floor(this.context.sampleRate * 0.09);
+      const breathBuf = this.context.createBuffer(1, breathLen, this.context.sampleRate);
+      const bd = breathBuf.getChannelData(0);
+      for (let i = 0; i < breathLen; i += 1) {
+        const k = 1 - i / breathLen;
+        bd[i] = (Math.random() * 2 - 1) * k * k;
+      }
+      const breath = this.context.createBufferSource();
+      breath.buffer = breathBuf;
+      const breathFilter = this.context.createBiquadFilter();
+      breathFilter.type = "bandpass";
+      breathFilter.frequency.value = 900;
+      breathFilter.Q.value = 1.2;
+      const breathGain = this.context.createGain();
+      breathGain.gain.setValueAtTime(0.0001, now);
+      breathGain.gain.exponentialRampToValueAtTime(v.vol * 0.16, now + 0.014);
+      breathGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+
+      /* 包络：柔软起音（12%）→ 平台 → 自然收尾 */
+      out.gain.setValueAtTime(0.0001, now);
+      out.gain.exponentialRampToValueAtTime(v.vol, now + v.dur * 0.12);
+      out.gain.setValueAtTime(v.vol, now + v.dur * 0.6);
+      out.gain.exponentialRampToValueAtTime(0.0001, now + v.dur);
+
+      osc.connect(formant);
+      osc2.connect(g2);
+      g2.connect(formant);
+      formant.connect(soft);
+      soft.connect(out);
+      out.connect(this.master);
+      breath.connect(breathFilter);
+      breathFilter.connect(breathGain);
+      breathGain.connect(out);
+
       osc.start(now);
+      osc2.start(now);
       lfo.start(now);
-      osc.stop(now + profile.duration + 0.03);
-      lfo.stop(now + profile.duration + 0.03);
+      breath.start(now);
+      const endAt = now + v.dur + 0.03;
+      osc.stop(endAt);
+      osc2.stop(endAt);
+      lfo.stop(endAt);
+    }
+
+    /* 小熊猫：不是猫，用鸟鸣式短啾（上行两声） */
+    pandaVoice(kind = "jump") {
+      const now = this.context.currentTime;
+      const sad = kind === "fall" || kind === "purr";
+      const notes = sad
+        ? [[980, 700, 0.16], [700, 430, 0.24]]
+        : [[1180, 1580, 0.085], [1520, 1880, 0.075]];
+      notes.forEach(([a, b, d], i) => {
+        const osc = this.context.createOscillator();
+        const gain = this.context.createGain();
+        osc.type = "sine";
+        const t = now + i * (d + 0.035);
+        osc.frequency.setValueAtTime(a, t);
+        osc.frequency.exponentialRampToValueAtTime(b, t + d);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(sad ? 0.05 : 0.06, t + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + d);
+        osc.connect(gain);
+        gain.connect(this.master);
+        osc.start(t);
+        osc.stop(t + d + 0.02);
+      });
     }
 
     tone(frequency, duration, options = {}) {
@@ -632,7 +739,7 @@
       this.chargeOsc.type = "sine";
       this.chargeOsc.frequency.setValueAtTime(145, now);
       this.chargeGain.gain.setValueAtTime(0.0001, now);
-      this.chargeGain.gain.exponentialRampToValueAtTime(0.025, now + 0.8);
+      this.chargeGain.gain.exponentialRampToValueAtTime(0.038, now + 0.8);
       this.chargeOsc.connect(this.chargeGain);
       this.chargeGain.connect(this.master);
       this.chargeOsc.start(now);
@@ -643,7 +750,7 @@
       const now = this.context.currentTime;
       this.chargeOsc.frequency.setTargetAtTime(145 + power * 470, now, 0.045);
       if (this.chargeGain) {
-        this.chargeGain.gain.setTargetAtTime(0.018 + power * 0.018, now, 0.05);
+        this.chargeGain.gain.setTargetAtTime(0.028 + power * 0.030, now, 0.05);
       }
     }
 
@@ -669,13 +776,9 @@
 
     jump(power) {
       this.stopCharge();
-      this.tone(330 + power * 130, 0.13, {
-        endFrequency: 760 + power * 180,
-        type: "triangle",
-        volume: 0.05,
-      });
-      this.tone(980, 0.07, { delay: 0.03, type: "sine", volume: 0.022 });
+      /* 只剩一声软糯的小奶猫「喵」，不再有机械的弹跳音 */
       this.meow("jump");
+      this.noise(0.09, 0.012, 2400);
     }
 
     land(perfect, combo) {
@@ -686,9 +789,9 @@
       });
       if (perfect) {
         const base = 600 + Math.min(combo, 6) * 32;
-        this.tone(base, 0.16, { delay: 0.03, type: "sine", volume: 0.04 });
-        this.tone(base * 1.5, 0.22, { delay: 0.075, type: "triangle", volume: 0.025 });
-        this.meow("happy");
+        this.tone(base, 0.16, { delay: 0.03, type: "sine", volume: 0.05 });
+        this.tone(base * 1.5, 0.22, { delay: 0.075, type: "triangle", volume: 0.032 });
+        this.meow("purr");
       }
     }
 
@@ -699,9 +802,17 @@
 
     fail() {
       this.stopCharge();
-      this.tone(210, 0.5, { endFrequency: 62, type: "sawtooth", volume: 0.03 });
-      this.tone(120, 0.38, { endFrequency: 52, type: "sine", volume: 0.04 });
+      /* 掉下去：一声绵长的委屈哭腔 + 落地闷响，不要低音锯齿（那是狗叫） */
       this.meow("fall");
+      this.tone(96, 0.22, { delay: 0.42, endFrequency: 58, type: "sine", volume: 0.045 });
+    }
+
+    /* 通关 / 破纪录：高兴地「咪」一声 */
+    win() {
+      this.meow("happy");
+      [880, 1108, 1318].forEach((f, i) => {
+        this.tone(f, 0.18, { delay: 0.16 + i * 0.075, type: "sine", volume: 0.035 });
+      });
     }
 
     rescue() {
@@ -745,6 +856,7 @@
   function getBest(mode = state.mode) {
     if (mode === "race") return Math.max(0, Number(save.bestRaceByDuration[save.raceDuration]) || 0);
     if (mode === "gamble") return Math.max(0, Number(save.bestGambleBySteps[save.gambleSteps]) || 0);
+    if (mode === "precision") return Math.max(0, Number(save.bestPrecision) || 0);
     return Math.max(0, Number(save.best) || 0);
   }
 
@@ -777,7 +889,7 @@
   };
 
   function physicsOn() {
-    return !!save.skills && state.mode !== "gamble";
+    return !!save.skills && !isBlindLike();
   }
 
   function catPhysics(cat) {
@@ -940,7 +1052,9 @@
     });
     if (state.mode === "race") {
       el.modeDesc.textContent = `${formatTime(save.raceDuration)} 赛道，失误扣 5 秒。`;
-    } else if (state.mode === "gamble") {
+    } else if (isPrecision()) {
+      el.modeDesc.textContent = `5 次校准：每次给出标准力度，压进 ±${Math.round(PRECISION_TOL * 100)}% 必然 Perfect；蓄力满 100% 回环。`;
+    } else if (isBlindLike()) {
       el.modeDesc.textContent = `共 ${save.gambleSteps} 步，每轮 5 次，共 ${Math.ceil(save.gambleSteps / 5)} 轮；无天气无技能。`;
     } else {
       el.modeDesc.textContent = definition.desc;
@@ -977,11 +1091,11 @@
 
   function updateQuickWeather() {
     if (!el.quickWeather) return;
-    if (state.mode === "gamble") {
+    if (isBlindLike()) {
       el.quickWeather.disabled = true;
       el.quickWeather.setAttribute("aria-pressed", "false");
       el.quickWeatherIcon.textContent = "—";
-      el.quickWeatherText.textContent = "盲押无天气";
+      el.quickWeatherText.textContent = isPrecision() ? "精准无天气" : "盲押无天气";
       return;
     }
     el.quickWeather.disabled = false;
@@ -1117,6 +1231,7 @@
       state.randomPreviewId = randomCatId(state.randomPreviewId);
       persist();
       audio.init();
+      audio.setVoice(state.randomPreviewId);
       audio.click();
       haptic(6);
       renderSelectedCard();
@@ -1135,6 +1250,7 @@
     state.randomPreviewId = null;
     persist();
     audio.init();
+    audio.setVoice(cat.id);
     audio.click();
     audio.meow("hello");
     haptic(6);
@@ -1158,8 +1274,8 @@
   }
 
   function toggleWeather() {
-    if (state.mode === "gamble") {
-      showToast("盲押五连不刮风不下雨，专心跟手感。");
+    if (isBlindLike()) {
+      showToast(isPrecision() ? "精准模式不比天气，只看这一下压得准不准。" : "盲押五连不刮风不下雨，专心跟手感。");
       return;
     }
     save.weather = !save.weather;
@@ -1295,7 +1411,8 @@
     state.blind.powers = [];
     state.blind.results = [];
     state.blind.allResults = [];
-    state.blind.totalSteps = save.gambleSteps;
+    state.blind.totalSteps = isPrecision() ? PRECISION_STEPS : save.gambleSteps;
+    state.blind.targets = [];
     state.blind.rounds = Math.max(1, Math.ceil(save.gambleSteps / 5));
     state.blind.roundIndex = 0;
     state.blind.localIndex = 0;
@@ -1397,7 +1514,7 @@
   }
 
   function updateBlindVisibility() {
-    const visible = state.mode === "gamble" && state.screen === "playing";
+    const visible = isBlindLike() && state.screen === "playing";
     el.blindPanel.classList.toggle("is-visible", visible);
     if (visible) el.tutorial.classList.add("is-hidden");
   }
@@ -1410,10 +1527,13 @@
     const blind = state.blind;
     const total = blind.totalSteps || save.gambleSteps;
     const rounds = blind.rounds || Math.ceil(total / 5);
+    if (el.blindKicker) el.blindKicker.textContent = isPrecision() ? "PRECISION" : "BLIND BET";
     el.blindCount.textContent = String(blind.powers.length);
     el.blindProgress.textContent = `总进度 ${Math.min(total, blindCompletedSteps())} / ${total} · 第 ${Math.min(rounds, blind.roundIndex + 1)} / ${rounds} 轮`;
     if (blind.stage === "input") {
-      el.blindInstruction.textContent = `第 ${blind.roundIndex + 1} 轮 · 按住蓄力，松手记一笔`;
+      el.blindInstruction.textContent = isPrecision()
+        ? `第 ${blind.powers.length + 1} 次 · 目标 ${Math.round((blind.targets[blind.powers.length] || 0) * 100)}%，压准就是完美`
+        : `第 ${blind.roundIndex + 1} 轮 · 按住蓄力，松手记一笔`;
     } else if (blind.stage === "wait") {
       el.blindInstruction.textContent = "五笔记好，准备开奖";
     } else if (blind.stage === "break") {
@@ -1432,7 +1552,15 @@
         label.textContent = result.kind === "perfect" ? "完美" : result.kind === "hit" ? "普通" : "落空";
       } else if (power != null) {
         slot.classList.add("is-filled");
-        label.textContent = `${Math.round(power * 100)}%`;
+        if (isPrecision() && blind.targets[index] != null) {
+          const diff = Math.abs(power - blind.targets[index]);
+          slot.classList.add(diff <= PRECISION_TOL ? "is-perfect" : diff <= PRECISION_TOL * 2.6 ? "is-hit" : "is-miss");
+          label.textContent = `${Math.round(blind.targets[index] * 100)}→${Math.round(power * 100)}`;
+        } else {
+          label.textContent = `${Math.round(power * 100)}%`;
+        }
+      } else if (isPrecision() && blind.targets[index] != null) {
+        label.textContent = `目标 ${Math.round(blind.targets[index] * 100)}%`;
       } else {
         label.textContent = "—";
       }
@@ -1494,7 +1622,17 @@
     const blind = state.blind;
     if (blind.localIndex < 0 || blind.localIndex >= 5) return;
     blind.stage = "jumping";
-    beginJump(blind.powers[blind.localIndex], { blind: true, auto: true });
+    const opts = { blind: true, auto: true };
+    if (isPrecision()) {
+      const goal = blind.targets[blind.localIndex];
+      const got = blind.powers[blind.localIndex];
+      if (goal != null && Math.abs(got - goal) <= PRECISION_TOL) {
+        opts.preciseSnap = true;
+        addFloater("压准了", state.player.x, state.player.y - 120, "#4f8a6b");
+        audio.tone(1320, 0.1, { type: "sine", volume: 0.04 });
+      }
+    }
+    beginJump(blind.powers[blind.localIndex], opts);
     updateBlindUI();
   }
 
@@ -1577,7 +1715,7 @@
           state.score += 10;
           addFloater("全中 +10", state.player.x, state.player.y - 118, "#b07a23");
         }
-        endRun("gamble");
+        endRun(isPrecision() ? "precision" : "gamble");
         return;
       }
       const base = (blind.roundIndex + 1) * 5;
@@ -1642,6 +1780,32 @@
     updateBlindVisibility();
     audio.click();
     haptic(5);
+  }
+
+  function makePrecisionTargets() {
+    const targets = [];
+    for (let i = 0; i < PRECISION_STEPS; i += 1) {
+      /* 0.18 ~ 0.90，避免太靠两端的「一碰就到」 */
+      targets.push(Math.round(rand(0.18, 0.9) * 100) / 100);
+    }
+    state.blind.targets = targets;
+    return targets;
+  }
+
+  function startPrecisionRun() {
+    resetRunState();
+    resetWorld(false);
+    buildBlindCourse(PRECISION_STEPS);
+    state.mode = "precision";
+    app.dataset.mode = "precision";
+    setWeather("clear", { silent: true, skipSeen: true });
+    makePrecisionTargets();
+    el.skillStatus.classList.remove("is-visible");
+    el.tutorial.classList.add("is-hidden");
+    updateBlindVisibility();
+    updateBlindUI();
+    updateHud();
+    state.raceBannerTimer = 0;
   }
 
   function startGambleRun() {
@@ -1743,7 +1907,7 @@
   }
 
   function maybeChangeWeather() {
-    if (state.mode === "gamble" || !save.weather) return;
+    if (isBlindLike() || !save.weather) return;
     state.weatherJumpsLeft -= 1;
     if (state.weatherJumpsLeft > 0) return;
     const next = chooseNextWeather();
@@ -1752,7 +1916,7 @@
   }
 
   function triggerLightning() {
-    if (state.mode === "gamble" || state.weatherType !== "lightning" || !save.weather) return;
+    if (isBlindLike() || state.weatherType !== "lightning" || !save.weather) return;
     state.flash = 1;
     state.bolt = 1;
     state.shake = Math.max(state.shake, 8);
@@ -1825,11 +1989,13 @@
     } else {
       state.runCatId = save.selected;
     }
+    audio.setVoice(state.runCatId);
     resetRunState();
     setScreen("playing");
     resetWorld(false);
-    if (state.mode === "gamble") {
-      startGambleRun();
+    if (isBlindLike()) {
+      if (isPrecision()) startPrecisionRun();
+      else startGambleRun();
       if (save.selected === "random") showToast(`本局随机到 ${activeRunCat().name}。`);
       return;
     }
@@ -1866,6 +2032,12 @@
     state.raceExpired = true;
 
     const mode = state.mode;
+    /* 跑完全程/时间到 = 这一局成了，猫会高兴地咪一声；掉落的不再补喜音 */
+    const finishedClean = reason === "gamble" || reason === "precision" || reason === "time";
+    state.resultWin = finishedClean;
+    if (finishedClean) {
+      window.setTimeout(() => audio.win(), 260);
+    }
     const stats = save.stats;
     stats.totalRuns += 1;
     stats.modes[mode] = (stats.modes[mode] || 0) + 1;
@@ -1881,6 +2053,11 @@
       );
       stats.raceBest = Math.max(stats.raceBest, state.score);
       stats.raceRuns += 1;
+    } else if (mode === "precision") {
+      save.bestPrecision = Math.max(Number(save.bestPrecision) || 0, state.score);
+      stats.precisionBest = Math.max(Number(stats.precisionBest) || 0, state.score);
+      stats.precisionRuns += 1;
+      if (state.perfects === (state.blind.totalSteps || PRECISION_STEPS)) stats.precisionPerfectRuns += 1;
     } else if (mode === "gamble") {
       save.bestGamble = Math.max(save.bestGamble, state.score);
       save.bestGambleBySteps[save.gambleSteps] = Math.max(
@@ -1933,6 +2110,11 @@
     } else if (mode === "race") {
       title = state.resultReason === "time" ? "赛道到点" : "赛道提前收工";
       quote = state.score >= 100 ? "这条赛道，猫比秒表快。" : "下一轮把失误的 5 秒抢回来。";
+    } else if (mode === "precision") {
+      const total = state.blind.totalSteps || PRECISION_STEPS;
+      const allPerfect = state.perfects === total;
+      title = allPerfect ? "手指比猫还稳" : state.perfects >= 3 ? "压得挺准" : "还是在凭感觉";
+      quote = allPerfect ? `${total} 次全压进判定圈，这手是练过的。` : "盯着目标刻度，别管它涨到多少，只看差多少。";
     } else {
       const total = state.blind.totalSteps || save.gambleSteps;
       const allPerfect = state.perfects === total;
@@ -1944,7 +2126,13 @@
 
   function renderResult() {
     const result = prepareResultText(state.mode);
-    el.resultKicker.textContent = state.mode === "classic" ? "ROUND OVER" : state.mode === "race" ? "TIME ATTACK" : "BLIND BET RESULT";
+    el.resultKicker.textContent = state.mode === "classic"
+      ? "ROUND OVER"
+      : state.mode === "race"
+        ? "TIME ATTACK"
+        : isPrecision()
+          ? "PRECISION RESULT"
+          : "BLIND BET RESULT";
     el.resultTitle.textContent = result.title;
     el.resultQuote.textContent = result.quote;
     el.finalScore.textContent = String(state.score);
@@ -1978,7 +2166,7 @@
       timeChip.textContent = state.resultReason === "time" ? `${state.raceTotal} 秒到点` : "提前结束";
       el.resultModeNote.appendChild(timeChip);
     }
-    if (state.mode !== "gamble") {
+    if (!isBlindLike()) {
       const catChip = document.createElement("span");
       catChip.textContent = activeRunCat().name;
       el.resultModeNote.appendChild(catChip);
@@ -2012,9 +2200,12 @@
     const best = getBest(state.mode);
     const configPrefix = state.mode === "race"
       ? `${formatTime(save.raceDuration)} · `
-      : state.mode === "gamble"
+      : isBlindLike()
         ? `${save.gambleSteps} 步 · `
         : "";
+    if (el.resultCat && window.RealCat && window.RealCat.face) {
+      window.RealCat.face(el.resultCat, activeRunCat(), state.resultWin ? "win" : "fail");
+    }
     el.resultBestLine.textContent = save.selected === "random"
       ? `${activeRunCat().name} · ${configPrefix}本机最好 ${best} 分`
       : `${configPrefix}本机最好 ${best} 分`;
@@ -2094,7 +2285,7 @@
   function updateSkillStatus() {
     const cat = activeRunCat();
     const hasOneShot = cat.skillType === "rescue" || cat.skillType === "tail";
-    const show = state.screen === "playing" && save.skills && state.mode !== "gamble";
+    const show = state.screen === "playing" && save.skills && !isBlindLike();
     el.skillStatus.classList.toggle("is-visible", show);
     el.skillStatus.classList.toggle("is-spent", hasOneShot && state.skillUsed);
     if (!show) return;
@@ -2271,7 +2462,7 @@
 
   function canCharge() {
     if (state.screen !== "playing" || state.paused || state.phase !== "idle" || state.raceExpired) return false;
-    if (state.mode === "gamble") {
+    if (isBlindLike()) {
       return state.blind.stage === "input" && state.blind.powers.length < 5 && state.blind.inputLock <= 0;
     }
     const next = nextPlatform();
@@ -2284,6 +2475,7 @@
     state.phase = "charging";
     state.chargeElapsed = 0;
     state.chargeEmit = 0;
+    state.chargeLoops = 0;
     state.player.power = 0;
     state.tutorialDone = true;
     el.tutorial.classList.add("is-hidden");
@@ -2304,7 +2496,7 @@
     if (state.phase !== "charging" || state.screen !== "playing" || state.paused) return;
     const power = clamp(state.player.power, 0.025, 1);
     state.phase = "idle";
-    if (state.mode === "gamble") {
+    if (isBlindLike()) {
       recordBlindPress(power);
       state.player.power = 0;
       audio.stopCharge();
@@ -2316,7 +2508,17 @@
   function updateCharge(dt) {
     state.chargeElapsed += dt * 1000;
     const duration = chargeDuration();
-    const power = clamp(state.chargeElapsed / duration, 0, 1);
+    const raw = state.chargeElapsed / duration;
+    /* 精准模式：到 100% 不封顶，回环到 0 重新涨，可以无限微调 */
+    const power = isPrecision() ? raw % 1 : clamp(raw, 0, 1);
+    if (isPrecision()) {
+      const loops = Math.floor(raw);
+      if (loops > (state.chargeLoops || 0)) {
+        state.chargeLoops = loops;
+        haptic(3);
+        audio.tone(1200, 0.05, { type: "sine", volume: 0.03 });
+      }
+    }
     state.player.power = power;
     audio.updateCharge(power);
     if (power >= 1 && state.chargeElapsed - dt * 1000 < duration) {
@@ -2340,12 +2542,12 @@
     const directionX = dx / required;
     const directionY = dy / required;
     const range = jumpRange();
-    const travel = range.min + (range.max - range.min) * Math.pow(power, 1.08);
+    let travel = range.min + (range.max - range.min) * Math.pow(power, 1.08);
 
     let windDrift = 0;
     let windLean = 0;
     let slip = 0;
-    if (!options.blind && save.weather && state.mode !== "gamble") {
+    if (!options.blind && save.weather && !isBlindLike()) {
       if (state.weatherType === "wind") {
         windDrift = state.windDir * (24 + state.weatherIntensity * 66) * rand(0.85, 1.25);
         windLean = state.windDir * (0.85 + state.weatherIntensity * 0.95);
@@ -2356,10 +2558,16 @@
       }
     }
 
-    const baseX = startX + directionX * travel + windDrift;
-    const baseY = startY + directionY * travel;
-    const finalX = baseX + directionX * slip;
-    const finalY = baseY + directionY * slip;
+    let baseX = startX + directionX * travel + windDrift;
+    let baseY = startY + directionY * travel;
+    let finalX = baseX + directionX * slip;
+    let finalY = baseY + directionY * slip;
+    /* 精准模式压准了：直接把落点钉在平台中心 */
+    if (options.preciseSnap) {
+      finalX = target.x;
+      finalY = target.y;
+      travel = required;
+    }
     state.jump = {
       startX, startY, finalX, finalY,
       targetX: target.x, targetY: target.y,
@@ -2469,9 +2677,15 @@
       }
     }
 
-    const perfect = error <= perfectRadius;
+    let perfect = error <= perfectRadius;
     const slip = state.jump ? state.jump.slip : 0;
     const catSkill = save.skills ? cat.skillType : null;
+    /* 三花猫：花色帮忙，普通落地有概率升格 Perfect */
+    if (!perfect && catSkill === "lucky" && Math.random() < 0.22) {
+      perfect = true;
+      addFloater("花斑好运", state.player.x, target.y - 128, "#b07a3f");
+      addRing(target.x, target.y, "rgba(214,150,96,.72)", 52, 0.5, 2.2);
+    }
     let points = 1;
     if (perfect) {
       state.combo += 1;
@@ -2600,7 +2814,7 @@
   }
 
   function updateBlindState(dt) {
-    if (state.mode !== "gamble" || state.screen !== "playing") return;
+    if (!isBlindLike() || state.screen !== "playing") return;
     const blind = state.blind;
     if (blind.inputLock > 0) blind.inputLock = Math.max(0, blind.inputLock - dt);
     if (blind.stage === "wait") {
@@ -2657,12 +2871,12 @@
       }
     }
 
-    if (state.weatherType === "lightning" && save.weather && state.mode !== "gamble") {
+    if (state.weatherType === "lightning" && save.weather && !isBlindLike()) {
       state.lightningTimer -= dt;
       if (state.lightningTimer <= 0) triggerLightning();
     }
 
-    if (state.mode === "gamble") updateBlindState(dt);
+    if (isBlindLike()) updateBlindState(dt);
 
     if (state.phase === "charging") {
       updateCharge(dt);
@@ -2978,7 +3192,7 @@
       state.screen === "playing" &&
       state.phase === "charging" &&
       save.skills &&
-      state.mode !== "gamble" &&
+      !isBlindLike() &&
       activeRunCat().skillType === "aim"
     ) {
       const alpha = 0.6 + state.player.power * 0.32;
@@ -3064,7 +3278,7 @@
       context.restore();
     }
 
-    const windStrength = state.weatherType === "wind" && save.weather && state.mode !== "gamble"
+    const windStrength = state.weatherType === "wind" && save.weather && !isBlindLike()
       ? state.windDir * (0.4 + state.weatherIntensity * 0.6)
       : 0;
     RealCat.draw(context, cat, sx, sy, {
@@ -3076,14 +3290,18 @@
       time: state.ambient,
       wind: isJumping && state.jump ? (state.jump.windLean || windStrength) : windStrength,
       blink: isFalling ? false : null,
-      /* 下落用专门的 fall 帧；其余交给 charge/air/land 权重分配 */
+      /* 掉下去就换成委屈哭脸 */
+      mood: isFalling ? "fail" : "normal",
       falling: isFalling,
     });
 
-    if (isCharging) drawChargeMeter(context, sx, sy - 100, state.player.power, barLength());
+    if (isCharging) {
+      const aimTarget = isPrecision() ? state.blind.targets[state.blind.powers.length] : null;
+      drawChargeMeter(context, sx, sy - 100, state.player.power, barLength(), aimTarget);
+    }
   }
 
-  function drawChargeMeter(context, x, y, power, barScale) {
+  function drawChargeMeter(context, x, y, power, barScale, targetPower) {
     const width = 96 * clamp(barScale || 1, 0.7, 1.4);
     const height = 10;
     const left = x - width / 2;
@@ -3116,6 +3334,20 @@
     context.fillStyle = "#ffffff";
     context.fillRect(left, top + 1.4, width * power, 2.2);
     context.restore();
+
+    if (typeof targetPower === "number" && targetPower > 0) {
+      /* 精准模式：容差带 + 目标刻度 */
+      const bandLeft = left + width * Math.max(0, targetPower - PRECISION_TOL);
+      const bandW = width * Math.min(1, targetPower + PRECISION_TOL) - bandLeft;
+      context.fillStyle = "rgba(58,140,98,.34)";
+      context.fillRect(bandLeft, top + 1.2, Math.max(2, bandW), height - 2.4);
+      context.strokeStyle = "rgba(38,110,78,.95)";
+      context.lineWidth = 1.6;
+      context.beginPath();
+      context.moveTo(left + width * targetPower, top - 3);
+      context.lineTo(left + width * targetPower, top + height + 3);
+      context.stroke();
+    }
 
     context.strokeStyle = "rgba(255,255,255,.55)";
     context.lineWidth = 0.7;
@@ -3440,7 +3672,7 @@
     ctx.translate(shakeX, shakeY);
     drawWorldBackdrop(ctx);
 
-    const drawNext = state.showNextPlatform && state.platforms[1] && !(state.mode === "gamble" && ["input", "wait", "break"].includes(state.blind.stage));
+    const drawNext = state.showNextPlatform && state.platforms[1] && !(isBlindLike() && ["input", "wait", "break"].includes(state.blind.stage));
     const ordered = [];
     if (state.platforms[0]) ordered.push({ platform: state.platforms[0], isNext: false });
     if (drawNext) ordered.push({ platform: state.platforms[1], isNext: true });
@@ -3794,6 +4026,10 @@
           mistakes: state.mistakes,
           selected: save.selected,
           runCat: activeRunCat().id,
+          blindTarget: state.blind.targets[state.blind.powers.length],
+          blindTargets: state.blind.targets.slice(),
+          blindPowers: state.blind.powers.slice(),
+          blindStage: state.blind.stage,
           skills: save.skills,
           weatherSetting: save.weather,
           weather: state.weatherType,

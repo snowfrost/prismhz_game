@@ -103,6 +103,10 @@
               <span class="mode-icon">×5</span>
               <span class="mode-copy"><b>盲押</b><small>五步一轮</small></span>
             </button>
+            <button class="mode-chip" data-mode="precision" type="button" role="tab" aria-selected="false">
+              <span class="mode-icon">◎</span>
+              <span class="mode-copy"><b>精准</b><small>压准必中</small></span>
+            </button>
           </div>
 
           <div class="mode-note">
@@ -228,7 +232,7 @@
         <div class="blind-panel" id="blindPanel">
           <div class="blind-head">
             <div>
-              <span class="blind-kicker">BLIND BET</span>
+              <span class="blind-kicker" id="blindKicker">BLIND BET</span>
               <b><span id="blindCount">0</span> / 5</b>
             </div>
             <span id="blindInstruction">按住蓄力，松手记一笔</span>
@@ -288,6 +292,7 @@
       <div class="modal-overlay gameover-overlay" id="gameoverOverlay">
         <div class="modal-card gameover-card" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
           <span class="modal-kicker" id="resultKicker">ROUND OVER</span>
+          <canvas class="result-cat" id="resultCat" width="240" height="200" aria-hidden="true"></canvas>
           <h2 id="resultTitle">猫步渐稳</h2>
           <p class="result-quote" id="resultQuote">差一点就摸到云了。</p>
           <div class="result-score">

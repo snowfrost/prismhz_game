@@ -217,7 +217,7 @@
 
 .mode-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   margin: -2px 0 7px;
 }
@@ -272,6 +272,11 @@
   background: #e9e0f8;
 }
 
+.mode-chip[data-mode="precision"] .mode-icon {
+  color: #3f7f68;
+  background: #dcefe4;
+}
+
 .mode-chip[data-mode="race"] .mode-icon {
   font-size: 9px;
   letter-spacing: -0.04em;
@@ -288,6 +293,10 @@
 
 .mode-chip[data-mode="gamble"].is-active .mode-icon {
   background: #9a86c2;
+}
+
+.mode-chip[data-mode="precision"].is-active .mode-icon {
+  background: #56a184;
 }
 
 .mode-copy {
@@ -1359,4 +1368,13 @@
 
 .blind-continue {
   pointer-events: auto;
+}
+
+/* 结算页猫咪表情 */
+.result-cat {
+  display: block;
+  width: 120px;
+  height: 100px;
+  margin: -6px auto 2px;
+  filter: drop-shadow(0 8px 12px rgba(120, 84, 70, 0.18));
 }

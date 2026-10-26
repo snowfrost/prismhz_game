@@ -22,6 +22,7 @@
 
   const catImages = Object.create(null);
   const headImages = Object.create(null);
+  const faceImages = Object.create(null);
   let pending = 0;
 
   /* ------------------------------------------------------------------ */
@@ -66,6 +67,22 @@
 
   function spriteOf(cat) {
     return loadImage(catImages, assetName(cat), "cats/");
+  }
+
+  /* 表情帧：catimg/face/<fail|win>/<cat>.webp，缺图时静默回退站立图 */
+  function faceOf(cat, mood) {
+    if (!mood || mood === "normal") return spriteOf(cat);
+    const name = assetName(cat);
+    const key = mood + "/" + name;
+    if (faceImages[key]) return faceImages[key];
+    const img = new Image();
+    const record = { img, ready: false, failed: false };
+    pending += 1;
+    img.onload = () => { record.ready = true; pending -= 1; };
+    img.onerror = () => { record.failed = true; pending -= 1; };
+    img.src = ASSET_BASE + "face/" + mood + "/" + name + ".webp";
+    faceImages[key] = record;
+    return record;
   }
 
   function headOf(cat) {
@@ -136,7 +153,9 @@
     const o = options || {};
     const pose = buildPose(o);
     const scale = typeof o.scale === "number" ? o.scale : 1;
-    const sprite = spriteOf(cat);
+    const mood = o.mood || "normal";
+    let sprite = faceOf(cat, mood);
+    if (!sprite.ready && mood !== "normal") sprite = spriteOf(cat);
 
     /* Sprite is always drawn at its native 360x300 aspect so every cat keeps
        the exact same scale and foot line.                                */
@@ -340,6 +359,47 @@
     ctx.restore();
   }
 
+  /* 结算页：单张表情图居中绘制 */
+  function paintFace(canvas, cat, mood) {
+    if (!canvas || !cat) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const m = mood || "normal";
+    const w = canvas.width;
+    const h = canvas.height;
+
+    const draw = () => {
+      const face = faceOf(cat, m);
+      const sprite = face.ready ? face : spriteOf(cat);
+      if (!sprite.ready) return false;
+      ctx.clearRect(0, 0, w, h);
+      const scale = Math.min((w * 0.96) / SPRITE_W, (h * 0.96) / SPRITE_H);
+      const dw = SPRITE_W * scale;
+      const dh = SPRITE_H * scale;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(sprite.img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+      return true;
+    };
+
+    const first = draw();
+    /* 表情图是懒加载的：第一帧可能还是站立图，等图片就绪后再补画一次 */
+    if (!first || !faceOf(cat, m).ready) {
+      let tries = 0;
+      const tick = () => {
+        if (faceOf(cat, m).ready) {
+          draw();
+          return;
+        }
+        tries += 1;
+        if (tries < 180) window.requestAnimationFrame(tick);
+      };
+      window.requestAnimationFrame(tick);
+      window.setTimeout(() => { if (faceOf(cat, m).ready && !first) draw(); }, 300);
+      window.setTimeout(() => { if (faceOf(cat, m).ready) draw(); }, 900);
+    }
+  }
+
   /* Debug helper for standalone sprite sheets */
   function paintBody(canvas, cat) {
     if (!canvas || !cat) return;
@@ -383,6 +443,7 @@
     portrait: portrait,
     catPortrait: portrait,
     body: paintBody,
+    face: paintFace,
     randomPortrait: randomPortrait,
     preload: preload,
     assetsReady: assetsReady,
